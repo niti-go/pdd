@@ -209,17 +209,39 @@ def process_xml_tags(text: str, recursive: bool, _seen: Optional[set] = None) ->
         _seen = set()
     text = process_pdd_tags(text)
     text = process_include_tags(text, recursive, _seen=_seen)
+    text = process_extract_tags(text, recursive)
     text = process_include_many_tags(text, recursive)
     text = process_shell_tags(text, recursive)
     text = process_web_tags(text, recursive)
     return text
 
+def _parse_attrs(attr_str: str) -> dict:
+    if not attr_str:
+        return {}
+    attrs = {}
+    # Simple attribute parser: key="value" or key='value'
+    for match in re.finditer(r'(\w+)\s*=\s*["\']([^"\']*)["\']', attr_str):
+        attrs[match.group(1)] = match.group(2)
+    return attrs
+
 def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None) -> str:
     if _seen is None:
         _seen = set()
-    pattern = r'<include>(.*?)</include>'
+    # Support both <include>path</include> and <include path="path" attrs... />
+    pattern = r'<include(?P<attrs>\s+[^>]*?)?>(?P<content>.*?)</include>|<include(?P<attrs_self>\s+[^>]*?)\s*/>'
+    
     def replace_include(match):
-        file_path = match.group(1).strip()
+        attrs_str = match.group('attrs') or match.group('attrs_self') or ""
+        attrs = _parse_attrs(attrs_str)
+        
+        file_path = attrs.get('path')
+        if file_path:
+            file_path = get_file_path(file_path) or match.group('content') or ""
+        file_path = file_path.strip()
+        
+        if not file_path:
+            return match.group(0)
+
         try:
             full_path = get_file_path(file_path)
             resolved = os.path.realpath(full_path)
@@ -269,6 +291,37 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
                 console.print(f"Processing XML include: [cyan]{full_path}[/cyan]")
                 with open(full_path, 'r', encoding='utf-8') as file:
                     content = file.read()
+                    
+                    # Apply selectors if any
+                    selectors_str = attrs.get('select')
+                    lines_str = attrs.get('lines')
+                    mode = attrs.get('mode', 'full')
+                    max_tokens = attrs.get('max_tokens')
+                    overflow = attrs.get('overflow', 'warn')
+                    
+                    if selectors_str or lines_str or mode != 'full' or max_tokens:
+                        selectors = []
+                        if selectors_str:
+                            selectors.extend([s.strip() for s in selectors_str.split(',')])
+                        if lines_str:
+                            selectors.append(f"lines:{lines_str}")
+                        
+                        try:
+                            from pdd.content_selector import ContentSelector
+                            selector = ContentSelector()
+                            content = selector.select(
+                                content=content,
+                                selectors=selectors,
+                                file_path=full_path,
+                                mode=mode,
+                                max_tokens=int(max_tokens) if max_tokens else None,
+                                overflow=overflow
+                            )
+                        except ImportError:
+                            console.print("[yellow]Warning: pdd.content_selector not found. Including full content.[/yellow]")
+                        except Exception as e:
+                            console.print(f"[bold red]Error in content selection:[/bold red] {e}")
+                    
                     if recursive:
                         child_seen = _seen | {resolved}
                         content = preprocess(content, recursive=True, double_curly_brackets=False, _seen=child_seen)
@@ -301,6 +354,41 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
             return replace_include(match)
         current_text = re.sub(pattern, replace_include_with_spans, current_text, flags=re.DOTALL)
     return current_text
+
+def process_extract_tags(text: str, recursive: bool) -> str:
+    pattern = r'<extract(?P<attrs>\s+[^>]*?)?>(?P<query>.*?)</extract>'
+    def replace_extract(match):
+        attrs_str = match.group('attrs') or ""
+        attrs = _parse_attrs(attrs_str)
+        query = match.group('query').strip()
+        file_path = attrs.get('path')
+        if file_path:
+            file_path = get_file_path(file_path)
+        
+        if not file_path:
+            console.print("[bold red]Error:[/bold red] <extract> tag missing 'path' attribute")
+            return "[Error: <extract> tag missing 'path' attribute]"
+            
+        if recursive:
+            return match.group(0)
+            
+        try:
+            from pdd.llm_extractor import LLMExtractor
+            extractor = LLMExtractor()
+            return extractor.extract(file_path=file_path, query=query)
+        except ImportError:
+            console.print("[yellow]Warning: pdd.llm_extractor not found. Cannot perform semantic extraction.[/yellow]")
+            return f"[Error: pdd.llm_extractor not found. Cannot extract from {file_path}]"
+        except Exception as e:
+            console.print(f"[bold red]Error in semantic extraction:[/bold red] {e}")
+            return f"[Error in semantic extraction from {file_path}: {e}]"
+            
+    code_spans = _extract_code_spans(text)
+    def replace_extract_with_spans(match):
+        if _intersects_any_span(match.start(), match.end(), code_spans):
+            return match.group(0)
+        return replace_extract(match)
+    return re.sub(pattern, replace_extract_with_spans, text, flags=re.DOTALL)
 
 def process_pdd_tags(text: str) -> str:
     pattern = r'<pdd>.*?</pdd>'

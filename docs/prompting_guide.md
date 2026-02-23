@@ -193,7 +193,7 @@ Tip: Prefer small, named sections using XML‑style tags to make context scannab
 
 ### Special XML Tags: pdd, shell, web
 
-The PDD preprocessor supports additional XML‑style tags to keep prompts clean, reproducible, and self‑contained. Processing order (per spec) is: `pdd` → `include`/`include-many` → `shell` → `web`. When `recursive=True`, `<shell>` and `<web>` are deferred until a non‑recursive pass.
+The PDD preprocessor supports additional XML‑style tags to keep prompts clean, reproducible, and self‑contained. Processing order (per spec) is: `pdd` → `include` → `extract` → `include-many` → `shell` → `web`. When `recursive=True`, `<shell>`, `<web>`, `<extract>`, and `<include-many>` are deferred until a non‑recursive pass.
 
 - ``
   - Purpose: human‑only comment. Removed entirely during preprocessing.
@@ -212,9 +212,10 @@ The PDD preprocessor supports additional XML‑style tags to keep prompts clean,
 
 > ⚠️ **Warning: Non-Deterministic Tags**
 >
-> `<shell>` and `<web>` introduce **non-determinism**:
+> `<shell>`, `<web>`, and `<extract>` introduce **non-determinism**:
 > - `<shell>` output varies by environment (different machines, different results)
 > - `<web>` content changes over time (same URL, different content)
+> - `<extract>` relies on LLM interpretation (may vary by model or seed)
 >
 > **Impact:** Same prompt file → different generations on different machines/times
 >
@@ -429,7 +430,55 @@ Use this pattern when:
 - **Shared constraints evolve** (e.g., coding standards, security policies). A single edit to the preamble file updates all prompts.
 - **Interface definitions change** (e.g., a dependency's example file). Prompts consuming that example stay current.
 
-*Tradeoff:* Large includes consume context tokens. If only a small portion of a file is relevant, consider extracting that portion into a dedicated include file (e.g., `docs/output_conventions.md` rather than the full `README.md`).
+### Selective Includes
+
+To further optimize token usage, PDD supports **Selective Includes**, allowing you to include only specific parts of a file (e.g., a single function, class, or section).
+
+**Syntax:**
+```xml
+<!-- Python: function/class extraction -->
+<include path="src/utils.py" select="def:parse_user_id"/>
+<include path="src/models.py" select="class:User"/>
+
+<!-- Markdown: section under heading -->
+<include path="docs/config.md" select="section:Environment Variables"/>
+
+<!-- Generic: line range or regex -->
+<include path="src/config.py" lines="10-50"/>
+<include path="src/constants.py" select="pattern:/^API_.*=/"/>
+```
+
+**Interface Mode:**
+Use `mode="interface"` to extract only the public API (signatures, docstrings, type hints) of a module, skipping implementation details. This is ideal for large dependencies where you only need the contract.
+
+```xml
+<include path="src/billing/service.py" select="class:BillingService" mode="interface"/>
+```
+
+**Token Budgeting:**
+Enforce token limits on included content using `max_tokens`. The `overflow` attribute determines behavior when the limit is exceeded (`warn` (default), `truncate`, or `error`).
+
+```xml
+<include path="docs/api_ref.md" max_tokens="1000" overflow="error"/>
+```
+
+### LLM-Powered Extraction (<extract>)
+
+For large, unstructured documents where structural selectors aren't enough (e.g., "find all retry policies in this 50-page PDF"), use the `<extract>` tag. This uses an LLM to semantically extract relevant information.
+
+**Syntax:**
+
+```xml
+<extract path="docs/large_api_reference.md">
+  Authentication flow, JWT token structure, and refresh token handling
+</extract>
+```
+
+**Behavior:**
+
+- **First run:** PDD asks an LLM to perform the extraction, caches the result in `.pdd/extracts/`, and includes it.
+- **Subsequent runs:** PDD uses the cached file (deterministic and fast).
+- **Updates:** If the source file changes, PDD warns you. Run `pdd extract refresh` to update the cache.
 
 ### Positive over Negative Constraints
 
