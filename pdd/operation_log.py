@@ -231,13 +231,15 @@ def save_fingerprint(
     """
     from dataclasses import asdict
     from datetime import timezone
-    from .sync_determine_operation import calculate_current_hashes, Fingerprint
+    from .sync_determine_operation import calculate_current_hashes, Fingerprint, read_fingerprint
     from . import __version__
 
     path = get_fingerprint_path(basename, language)
 
-    # Calculate file hashes from paths (if provided)
-    current_hashes = calculate_current_hashes(paths) if paths else {}
+    # Issue #522: Pass stored include deps for prompt hash calculation
+    prev_fp = read_fingerprint(basename, language)
+    stored_deps = prev_fp.include_deps if prev_fp else None
+    current_hashes = calculate_current_hashes(paths, stored_include_deps=stored_deps) if paths else {}
 
     # Create Fingerprint with same format as _save_fingerprint_atomic
     fingerprint = Fingerprint(
@@ -249,6 +251,7 @@ def save_fingerprint(
         example_hash=current_hashes.get('example_hash'),
         test_hash=current_hashes.get('test_hash'),
         test_files=current_hashes.get('test_files'),
+        include_deps=current_hashes.get('include_deps'),  # Issue #522
     )
 
     try:
@@ -336,8 +339,9 @@ def log_operation(
                 model = "unknown"
                 if success and result:
                     if isinstance(result, tuple) and len(result) >= 3:
-                        if isinstance(result[1], (int, float)): cost = float(result[1])
-                        if isinstance(result[2], str): model = str(result[2])
+                        from .sync_orchestration import _extract_cost_from_result, _extract_model_from_result
+                        cost = _extract_cost_from_result(operation, result)
+                        model = _extract_model_from_result(operation, result)
 
                 update_log_entry(entry, success=success, cost=cost, model=model, duration=duration, error=error_msg)
                 if basename and language:

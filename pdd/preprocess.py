@@ -15,6 +15,10 @@ from pdd.path_resolution import get_default_resolver
 install()
 console = Console()
 
+# Maximum iterations for the non-recursive convergence loop.
+# Diamond includes converge quickly; true cycles never converge.
+_MAX_INCLUDE_ITERATIONS = 50
+
 # Debug/Instrumentation controls
 _DEBUG_PREPROCESS = str(os.getenv("PDD_PREPROCESS_DEBUG", "")).lower() in ("1", "true", "yes", "on")
 _DEBUG_OUTPUT_FILE = os.getenv("PDD_PREPROCESS_DEBUG_FILE")  # Optional path to write a debug report
@@ -199,9 +203,13 @@ def process_backtick_includes(text: str, recursive: bool, _seen: Optional[set] =
             return f"```[Error processing include: {file_path}]```"
     prev_text = ""
     current_text = text
+    iterations = 0
     while prev_text != current_text:
+        if iterations >= _MAX_INCLUDE_ITERATIONS:
+            raise ValueError("Circular include detected: maximum include depth exceeded")
         prev_text = current_text
         current_text = re.sub(pattern, replace_include, current_text, flags=re.DOTALL)
+        iterations += 1
     return current_text
 
 def process_xml_tags(text: str, recursive: bool, _seen: Optional[set] = None) -> str:
@@ -345,7 +353,10 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
             return f"[Error processing include: {file_path}]"
     prev_text = ""
     current_text = text
+    iterations = 0
     while prev_text != current_text:
+        if iterations >= _MAX_INCLUDE_ITERATIONS:
+            raise ValueError("Circular include detected: maximum include depth exceeded")
         prev_text = current_text
         code_spans = _extract_code_spans(current_text)
         def replace_include_with_spans(match):
@@ -353,6 +364,7 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
                 return match.group(0)
             return replace_include(match)
         current_text = re.sub(pattern, replace_include_with_spans, current_text, flags=re.DOTALL)
+        iterations += 1
     return current_text
 
 def process_extract_tags(text: str, recursive: bool) -> str:

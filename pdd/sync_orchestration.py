@@ -70,6 +70,46 @@ from . import DEFAULT_STRENGTH
 # Note: _safe_basename is imported from sync_determine_operation
 
 
+def _extract_cost_from_result(operation: str, result: tuple) -> float:
+    """Extract cost from an operation result tuple at the correct index.
+
+    Each operation returns a different tuple format:
+    - crash/fix/verify: 6-tuple (..., cost, model) — cost at index 4
+    - generate: 4-tuple (content, was_incremental, cost, model) — cost at index 2
+    - example/test/test_extend/auto-deps: 3-or-4-tuple (..., cost, model, ...) — cost at index 1
+    """
+    if operation in ('crash', 'fix', 'verify'):
+        idx = 4
+    elif operation == 'generate':
+        idx = 2
+    else:
+        idx = 1
+    if len(result) > idx:
+        val = result[idx]
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            return float(val)
+    return 0.0
+
+
+def _extract_model_from_result(operation: str, result: tuple) -> str:
+    """Extract model name from an operation result tuple at the correct index.
+
+    Each operation returns a different tuple format:
+    - crash/fix/verify: 6-tuple (..., cost, model) — model at index 5
+    - generate: 4-tuple (content, was_incremental, cost, model) — model at index 3
+    - example/test/test_extend/auto-deps: 3-or-4-tuple (..., cost, model, ...) — model at index 2
+    """
+    if operation in ('crash', 'fix', 'verify'):
+        idx = 5
+    elif operation == 'generate':
+        idx = 3
+    else:
+        idx = 2
+    if len(result) > idx and isinstance(result[idx], str):
+        return result[idx]
+    return 'unknown'
+
+
 def _use_agentic_path(language: str, agentic_mode: bool) -> bool:
     """Returns True if we should use agentic path (non-Python OR agentic_mode for Python).
 
@@ -196,7 +236,8 @@ def _save_run_report_atomic(report: Dict[str, Any], basename: str, language: str
 
 def _save_fingerprint_atomic(basename: str, language: str, operation: str,
                                paths: Dict[str, Path], cost: float, model: str,
-                               atomic_state: Optional['AtomicStateUpdate'] = None):
+                               atomic_state: Optional['AtomicStateUpdate'] = None,
+                               include_deps_override: Optional[Dict[str, str]] = None):
     """Save fingerprint state after successful operation, supporting atomic updates.
 
     Args:
@@ -207,14 +248,26 @@ def _save_fingerprint_atomic(basename: str, language: str, operation: str,
         cost: The cost of the operation.
         model: The model used.
         atomic_state: Optional AtomicStateUpdate for atomic writes (Issue #159 fix).
+        include_deps_override: Pre-captured include deps (Issue #522). Used when
+            auto-deps may have stripped <include> tags before fingerprint save.
     """
     if atomic_state:
         # Buffer for atomic write
         from datetime import datetime, timezone
-        from .sync_determine_operation import calculate_current_hashes, Fingerprint
+        from .sync_determine_operation import calculate_current_hashes, Fingerprint, read_fingerprint
         from . import __version__
 
-        current_hashes = calculate_current_hashes(paths)
+        # Issue #522: Use override deps if provided (captured before auto-deps),
+        # otherwise fall back to stored deps from previous fingerprint
+        if include_deps_override is not None:
+            stored_deps = include_deps_override
+        else:
+            prev_fp = read_fingerprint(basename, language)
+            stored_deps = prev_fp.include_deps if prev_fp else None
+        current_hashes = calculate_current_hashes(paths, stored_include_deps=stored_deps)
+        # If override provided and current extraction found nothing, use the override
+        if include_deps_override and not current_hashes.get('include_deps'):
+            current_hashes['include_deps'] = include_deps_override
         fingerprint = Fingerprint(
             pdd_version=__version__,
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -224,6 +277,7 @@ def _save_fingerprint_atomic(basename: str, language: str, operation: str,
             example_hash=current_hashes.get('example_hash'),
             test_hash=current_hashes.get('test_hash'),
             test_files=current_hashes.get('test_files'),  # Bug #156
+            include_deps=current_hashes.get('include_deps'),  # Issue #522
         )
 
         fingerprint_file = META_DIR / f"{_safe_basename(basename)}_{language.lower()}.json"
@@ -1431,6 +1485,7 @@ def sync_orchestration(
                     result = {}
                     success = False
                     op_start_time = time.time()
+                    include_deps_override = None  # Issue #522: Captured before auto-deps strips tags
 
                     # Issue #159 fix: Use atomic state for consistent run_report + fingerprint writes
                     with AtomicStateUpdate(basename, language) as atomic_state:
@@ -1440,6 +1495,9 @@ def sync_orchestration(
                             if operation == 'auto-deps':
                                 temp_output = str(pdd_files['prompt']).replace('.prompt', '_with_deps.prompt')
                                 original_content = pdd_files['prompt'].read_text(encoding='utf-8')
+                                # Issue #522: Capture include deps BEFORE auto-deps may strip tags
+                                from .sync_determine_operation import extract_include_deps
+                                include_deps_override = extract_include_deps(pdd_files['prompt'])
                                 result = auto_deps_main(
                                     ctx,
                                     prompt_file=str(pdd_files['prompt']),
@@ -1582,7 +1640,7 @@ def sync_orchestration(
                                             crash_log_content = f"Auto-fixed: {auto_fix_msg}"
                                             # Fix for issue #430: Save fingerprint and track operation completion before continuing
                                             operations_completed.append('crash')
-                                            _save_fingerprint_atomic(basename, language, 'crash', pdd_files, 0.0, 'auto-fix', atomic_state=atomic_state)
+                                            _save_fingerprint_atomic(basename, language, 'crash', pdd_files, 0.0, 'auto-fix', atomic_state=atomic_state, include_deps_override=include_deps_override)
                                             continue  # Skip crash_main, move to next operation
                                         else:
                                             # Auto-fix didn't fully work, update error log and proceed
@@ -1854,8 +1912,7 @@ def sync_orchestration(
                                         success = pdd_files['test'].exists()
                                 else:
                                     success = bool(result[0])
-                                # Cost is always at index 1 in both 3-tuple and 4-tuple returns
-                                cost = result[1] if len(result) >= 2 and isinstance(result[1], (int, float)) else 0.0
+                                cost = _extract_cost_from_result(operation, result)
                                 current_cost_ref[0] += cost
                             else:
                                 success = result is not None
@@ -1877,20 +1934,11 @@ def sync_orchestration(
                                  actual_cost = result.get('cost', 0.0)
                                  model_name = result.get('model', 'unknown')
                             elif isinstance(result, tuple) and len(result) >= 3:
-                                 # cmd_test_main returns 4-tuple: (content, cost, model, agentic_success)
-                                 # Other commands may return either:
-                                 #   - 3-tuple: (content, cost, model), e.g. some context operations
-                                 #   - 4-tuple: (content, was_incremental, cost, model_name), e.g. code_generator_main
-                                 # For tests, cost is at index 1; for most other 4+ tuples, cost is at index -2 and model at -1.
-                                 if operation in ('test', 'test_extend') and len(result) >= 4:
-                                     actual_cost = result[1] if isinstance(result[1], (int, float)) else 0.0
-                                     model_name = result[2] if isinstance(result[2], str) else 'unknown'
-                                 else:
-                                     actual_cost = result[1] if isinstance(result[1], (int, float)) else 0.0
-                                     model_name = result[2] if len(result) >= 3 and isinstance(result[2], str) else 'unknown'
+                                 actual_cost = _extract_cost_from_result(operation, result)
+                                 model_name = _extract_model_from_result(operation, result)
                             last_model_name = str(model_name)
                             operations_completed.append(operation)
-                            _save_fingerprint_atomic(basename, language, operation, pdd_files, actual_cost, str(model_name), atomic_state=atomic_state)
+                            _save_fingerprint_atomic(basename, language, operation, pdd_files, actual_cost, str(model_name), atomic_state=atomic_state, include_deps_override=include_deps_override)
 
                         update_log_entry(log_entry, success=success, cost=actual_cost, model=model_name, duration=duration, error=errors[-1] if errors and not success else None)
                         append_log_entry(basename, language, log_entry)
