@@ -1,4 +1,4 @@
-"""CLI commands for managing the .pdd/query_cache/ directory."""
+"""CLI commands for managing the .pdd/extracts/ directory."""
 
 from __future__ import annotations
 
@@ -38,9 +38,9 @@ except ImportError:
         return re.findall(pattern, text)
 
 
-@click.group("query-cache")
-def query_cache():
-    """Manage the query cache."""
+@click.group("extracts")
+def extracts():
+    """Manage the extracts cache."""
     pass
 
 
@@ -70,29 +70,29 @@ def _collect_referenced_keys(project_root: Path) -> set[str]:
 
 
 def _cache_dir() -> Path | None:
-    """Return the query_cache directory or *None* if it doesn't exist."""
+    """Return the extracts directory or *None* if it doesn't exist."""
     cfg = get_config()
     root = Path(cfg.get("project_root", ".")).resolve()
-    d = root / ".pdd" / "query_cache"
+    d = root / ".pdd" / "extracts"
     return d if d.is_dir() else None
 
 
-@query_cache.command()
+@extracts.command()
 @click.option("--force", is_flag=True, default=False, help="Skip confirmation prompt.")
 @click.pass_context
 def prune(ctx: click.Context, force: bool) -> None:
-    """Delete orphaned query cache entries not referenced by any prompt file."""
+    """Delete orphaned extracts cache entries not referenced by any prompt file."""
     # Honour both the local --force and the global --force flag.
     force = force or (ctx.obj or {}).get("force", False)
 
     cache = _cache_dir()
     if cache is None:
-        click.echo("No query cache directory found (.pdd/query_cache/) – nothing to do.")
+        click.echo("No extracts directory found (.pdd/extracts/) – nothing to do.")
         return
 
     cached_md_files = sorted(cache.glob("*.md"))
     if not cached_md_files:
-        click.echo("Query cache is empty – nothing to prune.")
+        click.echo("Extracts cache is empty – nothing to prune.")
         return
 
     # Map cache key -> md path for every entry currently on disk.
@@ -119,7 +119,7 @@ def prune(ctx: click.Context, force: bool) -> None:
         from rich.table import Table
 
         console = Console()
-        table = Table(title="Orphaned query cache entries")
+        table = Table(title="Orphaned extracts cache entries")
         table.add_column("Cache Key", style="dim", no_wrap=True, max_width=16)
         table.add_column("Source Path")
         table.add_column("Query")
@@ -140,7 +140,7 @@ def prune(ctx: click.Context, force: bool) -> None:
         console.print(table)
     except ImportError:
         # Fallback when rich is not installed.
-        click.echo("Orphaned query cache entries:")
+        click.echo("Orphaned extracts cache entries:")
         for key in orphaned_keys:
             source_path = "<unknown>"
             query_text = "<unknown>"

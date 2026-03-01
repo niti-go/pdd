@@ -599,7 +599,7 @@ graph TB
 ### Prompt Management
 - **[`preprocess`](#5-preprocess)**: Preprocesses prompt files, handling includes, comments, and other directives
 - **[`split`](#7-split)**: Splits large prompt files into smaller, more manageable ones
-- **[`query-cache prune`](#21-query-cache)**: Garbage-collect orphaned query cache entries
+- **[`extracts prune`](#21-extracts)**: Garbage-collect orphaned extracts cache entries
 - **[`auto-deps`](#15-auto-deps)**: Analyzes and inserts needed dependencies into a prompt file
 - **[`detect`](#10-detect)**: Analyzes prompts to determine which ones need changes based on a description
 - **[`conflicts`](#11-conflicts)**: Finds and suggests resolutions for conflicts between two prompt files
@@ -2560,13 +2560,13 @@ pdd sessions cleanup --all --force
 
 **When to use**: Use `sessions list` to discover available remote sessions, `sessions info` to check session details, and `sessions cleanup` to remove stale or orphaned sessions.
 
-### 21. query-cache
+### 21. extracts
 
-The `<include path="..." query="..."/>` tag in prompts triggers LLM-powered semantic extraction with automatic caching in `.pdd/query_cache/`. Results are **auto-refreshed**: if the source file changes, PDD automatically re-extracts and updates the cache upon processing the `<include ... query>` tag the next time.
+The `<include path="..." query="..."/>` tag in prompts triggers LLM-powered semantic extraction with automatic caching in `.pdd/extracts/`. Results are **auto-refreshed**: if the source file changes, PDD automatically re-extracts and updates the cache upon processing the `<include ... query>` tag the next time.
 
 ```bash
 # Remove orphaned cache entries not referenced by any prompt
-pdd query-cache prune
+pdd extracts prune
 ```
 
 ### 22. Firecrawl Web Scraping Cache

@@ -2,8 +2,8 @@
 # TEST PLAN
 # =============================================================================
 #
-# The code under test implements a CLI subcommand `pdd query-cache prune` that:
-# 1. Checks if .pdd/query_cache/ directory exists
+# The code under test implements a CLI subcommand `pdd extracts prune` that:
+# 1. Checks if .pdd/extracts/ directory exists
 # 2. Checks if there are any .md files in the cache
 # 3. Scans .prompt files for <include> tags with query attributes
 # 4. Computes cache keys for referenced entries
@@ -13,8 +13,8 @@
 # 8. Deletes orphaned .md and .meta.json files
 #
 # PUBLIC API TO TEST:
-# - query_cache: click group
-# - prune: click command (subcommand of query_cache)
+# - extracts: click group
+# - prune: click command (subcommand of extracts)
 #
 # TEST CASES:
 #
@@ -61,8 +61,8 @@ from click.testing import CliRunner
 
 @pytest.fixture
 def project_dir(tmp_path):
-    """Create a minimal project structure with .pdd/query_cache/."""
-    cache_dir = tmp_path / ".pdd" / "query_cache"
+    """Create a minimal project structure with .pdd/extracts/."""
+    cache_dir = tmp_path / ".pdd" / "extracts"
     cache_dir.mkdir(parents=True)
     return tmp_path
 
@@ -94,18 +94,18 @@ def _create_cache_entry(cache_dir: Path, key: str, source_path: str = "src.py", 
 def cli_env(project_dir):
     """
     Provide a patched CLI environment.
-    Returns (query_cache_group, project_dir, cache_dir).
+    Returns (extracts_group, project_dir, cache_dir).
     """
-    cache_dir = project_dir / ".pdd" / "query_cache"
+    cache_dir = project_dir / ".pdd" / "extracts"
 
     config_patch = patch(
-        "pdd.query_cache_prune.get_config",
+        "pdd.extracts_prune.get_config",
         return_value={"project_root": str(project_dir)},
     )
 
     with config_patch:
-        from pdd.query_cache_prune import query_cache
-        yield query_cache, project_dir, cache_dir
+        from pdd.extracts_prune import extracts
+        yield extracts, project_dir, cache_dir
 
 
 # ---------------------------------------------------------------------------
@@ -116,15 +116,15 @@ class TestPruneEarlyExit:
     """Tests for early exit when cache doesn't exist or is empty."""
 
     def test_no_cache_directory(self, tmp_path, runner):
-        """When .pdd/query_cache/ doesn't exist, exit with info message."""
+        """When .pdd/extracts/ doesn't exist, exit with info message."""
         with patch(
-            "pdd.query_cache_prune.get_config",
+            "pdd.extracts_prune.get_config",
             return_value={"project_root": str(tmp_path)},
         ):
-            from pdd.query_cache_prune import query_cache
-            result = runner.invoke(query_cache, ["prune"], obj={"force": False})
+            from pdd.extracts_prune import extracts
+            result = runner.invoke(extracts, ["prune"], obj={"force": False})
         assert result.exit_code == 0
-        assert "nothing to do" in result.output.lower() or "No query cache directory" in result.output
+        assert "nothing to do" in result.output.lower() or "No extracts directory" in result.output
 
     def test_empty_cache_directory(self, cli_env, runner):
         """When cache dir exists but has no .md files, exit with info."""
@@ -160,13 +160,13 @@ class TestPruneNoOrphans:
         )
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[("data.py", "extract functions")],
         ), patch(
-            "pdd.query_cache_prune.get_file_path",
+            "pdd.extracts_prune.get_file_path",
             return_value=src_file.resolve(),
         ), patch(
-            "pdd.query_cache_prune.compute_cache_key",
+            "pdd.extracts_prune.compute_cache_key",
             return_value=key,
         ):
             result = runner.invoke(qc, ["prune"], obj={"force": False})
@@ -190,7 +190,7 @@ class TestPruneOrphans:
         _create_cache_entry(cache_dir, key, source_path="/old/file.py", query="old query")
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[],
         ):
             result = runner.invoke(qc, ["prune", "--force"], obj={"force": False})
@@ -208,7 +208,7 @@ class TestPruneOrphans:
         _create_cache_entry(cache_dir, key, source_path="/some/file.py", query="test query")
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[],
         ):
             result = runner.invoke(qc, ["prune"], input="y\n", obj={"force": False})
@@ -225,7 +225,7 @@ class TestPruneOrphans:
         _create_cache_entry(cache_dir, key, source_path="/some/file.py", query="test query")
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[],
         ):
             result = runner.invoke(qc, ["prune"], input="n\n", obj={"force": False})
@@ -243,7 +243,7 @@ class TestPruneOrphans:
         _create_cache_entry(cache_dir, key, source_path="/some/file.py", query="test query")
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[],
         ):
             result = runner.invoke(qc, ["prune"], obj={"force": True})
@@ -267,13 +267,13 @@ class TestPruneOrphans:
         prompt_file.write_text('<include path="keep.py" query="keep query" />', encoding="utf-8")
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[("keep.py", "keep query")],
         ), patch(
-            "pdd.query_cache_prune.get_file_path",
+            "pdd.extracts_prune.get_file_path",
             return_value=src_file.resolve(),
         ), patch(
-            "pdd.query_cache_prune.compute_cache_key",
+            "pdd.extracts_prune.compute_cache_key",
             return_value=ref_key,
         ):
             result = runner.invoke(qc, ["prune", "--force"], obj={"force": False})
@@ -300,7 +300,7 @@ class TestPruneMetaEdgeCases:
         (cache_dir / f"{key}.md").write_text("content", encoding="utf-8")
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[],
         ):
             result = runner.invoke(qc, ["prune", "--force"], obj={"force": False})
@@ -317,7 +317,7 @@ class TestPruneMetaEdgeCases:
         (cache_dir / f"{key}.meta.json").write_text("not valid json{{{", encoding="utf-8")
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[],
         ):
             result = runner.invoke(qc, ["prune", "--force"], obj={"force": False})
@@ -345,10 +345,10 @@ class TestPruneSourceNotFound:
         prompt_file.write_text('<include path="missing.py" query="q" />', encoding="utf-8")
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[("missing.py", "q")],
         ), patch(
-            "pdd.query_cache_prune.get_file_path",
+            "pdd.extracts_prune.get_file_path",
             side_effect=FileNotFoundError("not found"),
         ):
             result = runner.invoke(qc, ["prune", "--force"], obj={"force": False})
@@ -372,7 +372,7 @@ class TestPruneGrammar:
         _create_cache_entry(cache_dir, key)
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[],
         ):
             result = runner.invoke(qc, ["prune", "--force"], obj={"force": False})
@@ -390,7 +390,7 @@ class TestPruneGrammar:
             _create_cache_entry(cache_dir, key)
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[],
         ):
             result = runner.invoke(qc, ["prune", "--force"], obj={"force": False})
@@ -424,7 +424,7 @@ class TestPruneDeletionErrors:
             return original_unlink(self, *args, **kwargs)
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             return_value=[],
         ), patch.object(Path, "unlink", failing_unlink):
             result = runner.invoke(qc, ["prune", "--force"], obj={"force": False})
@@ -482,13 +482,13 @@ class TestPruneMultiplePromptFiles:
             return "unknown"
 
         with patch(
-            "pdd.query_cache_prune.parse_include_tags",
+            "pdd.extracts_prune.parse_include_tags",
             side_effect=mock_parse,
         ), patch(
-            "pdd.query_cache_prune.get_file_path",
+            "pdd.extracts_prune.get_file_path",
             side_effect=mock_get_file_path,
         ), patch(
-            "pdd.query_cache_prune.compute_cache_key",
+            "pdd.extracts_prune.compute_cache_key",
             side_effect=mock_compute_key,
         ):
             result = runner.invoke(qc, ["prune", "--force"], obj={"force": False})
@@ -506,19 +506,19 @@ class TestPruneMultiplePromptFiles:
 class TestClickGroupStructure:
     """Tests for the click group and command registration."""
 
-    def test_query_cache_is_group(self):
-        """query_cache should be a click Group."""
-        from pdd.query_cache_prune import query_cache
-        assert isinstance(query_cache, click.Group)
+    def test_extracts_is_group(self):
+        """extracts should be a click Group."""
+        from pdd.extracts_prune import extracts
+        assert isinstance(extracts, click.Group)
 
     def test_prune_is_registered(self):
-        """prune should be a registered command in the query_cache group."""
-        from pdd.query_cache_prune import query_cache
-        assert "prune" in query_cache.commands
+        """prune should be a registered command in the extracts group."""
+        from pdd.extracts_prune import extracts
+        assert "prune" in extracts.commands
 
     def test_prune_has_force_option(self):
         """prune command should have a --force option."""
-        from pdd.query_cache_prune import query_cache
-        prune_cmd = query_cache.commands["prune"]
+        from pdd.extracts_prune import extracts
+        prune_cmd = extracts.commands["prune"]
         param_names = [p.name for p in prune_cmd.params]
         assert "force" in param_names

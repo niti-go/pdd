@@ -16,7 +16,7 @@
 #   - `compute_cache_key(source_file_path, query)` -> deterministic sha256 hex
 #
 # Configuration:
-#   - `QUERY_CACHE_ENABLE` env var controls caching (default: true)
+#   - `EXTRACTS_CACHE_ENABLE` env var controls caching (default: true)
 #
 # EDGE CASES & TEST STRATEGY:
 #
@@ -29,7 +29,7 @@
 # 4. Stale cache (hash mismatch) -> Unit test: old cache removed, LLM called
 # 5. Corrupted meta.json -> Unit test: cache removed, LLM re-invoked
 # 6. Cache disabled via env var -> Unit test: LLM always called, no cache I/O
-# 7. QUERY_CACHE_ENABLE values: "false", "0", "no", "true", "" -> Unit tests
+# 7. EXTRACTS_CACHE_ENABLE values: "false", "0", "no", "true", "" -> Unit tests
 # 8. Cache key uniqueness property -> Z3 formal verification
 # 9. Extract writes both .md and .meta.json -> Unit test
 # 10. meta.json contains required fields -> Unit test
@@ -77,8 +77,8 @@ from pdd.include_query_extractor import (
 
 @pytest.fixture
 def tmp_project(tmp_path):
-    """Create a minimal project structure with .pdd/query_cache/."""
-    cache_dir = tmp_path / ".pdd" / "query_cache"
+    """Create a minimal project structure with .pdd/extracts/."""
+    cache_dir = tmp_path / ".pdd" / "extracts"
     cache_dir.mkdir(parents=True)
     return tmp_path
 
@@ -114,25 +114,25 @@ def patched_config(tmp_project):
 @pytest.fixture
 def cache_enabled():
     """Ensure cache is enabled."""
-    old = os.environ.pop("QUERY_CACHE_ENABLE", None)
-    os.environ["QUERY_CACHE_ENABLE"] = "true"
+    old = os.environ.pop("EXTRACTS_CACHE_ENABLE", None)
+    os.environ["EXTRACTS_CACHE_ENABLE"] = "true"
     yield
     if old is None:
-        os.environ.pop("QUERY_CACHE_ENABLE", None)
+        os.environ.pop("EXTRACTS_CACHE_ENABLE", None)
     else:
-        os.environ["QUERY_CACHE_ENABLE"] = old
+        os.environ["EXTRACTS_CACHE_ENABLE"] = old
 
 
 @pytest.fixture
 def cache_disabled():
     """Disable cache via environment variable."""
-    old = os.environ.pop("QUERY_CACHE_ENABLE", None)
-    os.environ["QUERY_CACHE_ENABLE"] = "false"
+    old = os.environ.pop("EXTRACTS_CACHE_ENABLE", None)
+    os.environ["EXTRACTS_CACHE_ENABLE"] = "false"
     yield
     if old is None:
-        os.environ.pop("QUERY_CACHE_ENABLE", None)
+        os.environ.pop("EXTRACTS_CACHE_ENABLE", None)
     else:
-        os.environ["QUERY_CACHE_ENABLE"] = old
+        os.environ["EXTRACTS_CACHE_ENABLE"] = old
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +227,7 @@ class TestExtractCacheMiss:
     ):
         """A .md cache file is created after extraction."""
         extractor.extract(str(source_file), "extract functions")
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
         md_files = list(cache_dir.glob("*.md"))
         assert len(md_files) == 1
         assert md_files[0].read_text(encoding="utf-8") == "extracted content here"
@@ -238,7 +238,7 @@ class TestExtractCacheMiss:
         """A .meta.json cache file is created with correct fields."""
         query = "extract functions"
         extractor.extract(str(source_file), query)
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
         meta_files = list(cache_dir.glob("*.meta.json"))
         assert len(meta_files) == 1
         meta = json.loads(meta_files[0].read_text(encoding="utf-8"))
@@ -254,7 +254,7 @@ class TestExtractCacheMiss:
     ):
         """source_hash in meta.json matches the actual file content hash."""
         extractor.extract(str(source_file), "q")
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
         meta_files = list(cache_dir.glob("*.meta.json"))
         meta = json.loads(meta_files[0].read_text(encoding="utf-8"))
         content = source_file.read_text(encoding="utf-8")
@@ -305,7 +305,7 @@ class TestExtractCacheHit:
         source_hash = hashlib.sha256(content.encode()).hexdigest()
         query = "extract functions"
         cache_key = compute_cache_key(str(resolved), query)
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
 
         _write_cache_entry(
             cache_dir, cache_key, "cached result",
@@ -344,7 +344,7 @@ class TestExtractStaleCache:
         resolved = source_file.resolve()
         query = "extract functions"
         cache_key = compute_cache_key(str(resolved), query)
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
 
         _write_cache_entry(
             cache_dir, cache_key, "old cached result",
@@ -362,7 +362,7 @@ class TestExtractStaleCache:
         resolved = source_file.resolve()
         query = "q"
         cache_key = compute_cache_key(str(resolved), query)
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
 
         _write_cache_entry(
             cache_dir, cache_key, "old content",
@@ -395,7 +395,7 @@ class TestExtractCorruptedCache:
         resolved = source_file.resolve()
         query = "q"
         cache_key = compute_cache_key(str(resolved), query)
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
 
         md_path = cache_dir / f"{cache_key}.md"
         meta_path = cache_dir / f"{cache_key}.meta.json"
@@ -412,7 +412,7 @@ class TestExtractCorruptedCache:
 # ===========================================================================
 
 class TestExtractCacheDisabled:
-    """Tests when QUERY_CACHE_ENABLE is false."""
+    """Tests when EXTRACTS_CACHE_ENABLE is false."""
 
     def test_always_calls_llm(
         self, source_file, extractor, patched_config, cache_disabled
@@ -427,7 +427,7 @@ class TestExtractCacheDisabled:
     ):
         """No cache files are written when cache is disabled."""
         extractor.extract(str(source_file), "q")
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
         assert list(cache_dir.glob("*.md")) == []
         assert list(cache_dir.glob("*.meta.json")) == []
 
@@ -436,25 +436,25 @@ class TestExtractCacheDisabled:
         self, source_file, extractor, patched_config, val
     ):
         """Various falsy values disable the cache."""
-        old = os.environ.get("QUERY_CACHE_ENABLE")
-        os.environ["QUERY_CACHE_ENABLE"] = val
+        old = os.environ.get("EXTRACTS_CACHE_ENABLE")
+        os.environ["EXTRACTS_CACHE_ENABLE"] = val
         try:
             extractor.extract(str(source_file), "q")
             extractor.extract(str(source_file), "q")
             assert extractor._llm_invoke.call_count == 2
         finally:
             if old is None:
-                os.environ.pop("QUERY_CACHE_ENABLE", None)
+                os.environ.pop("EXTRACTS_CACHE_ENABLE", None)
             else:
-                os.environ["QUERY_CACHE_ENABLE"] = old
+                os.environ["EXTRACTS_CACHE_ENABLE"] = old
 
     @pytest.mark.parametrize("val", ["true", "1", "yes", "TRUE", "anything"])
     def test_enable_values(
         self, source_file, extractor, patched_config, val
     ):
         """Various truthy values enable the cache."""
-        old = os.environ.get("QUERY_CACHE_ENABLE")
-        os.environ["QUERY_CACHE_ENABLE"] = val
+        old = os.environ.get("EXTRACTS_CACHE_ENABLE")
+        os.environ["EXTRACTS_CACHE_ENABLE"] = val
         try:
             extractor.extract(str(source_file), "q")
             extractor.extract(str(source_file), "q")
@@ -462,9 +462,9 @@ class TestExtractCacheDisabled:
             assert extractor._llm_invoke.call_count == 1
         finally:
             if old is None:
-                os.environ.pop("QUERY_CACHE_ENABLE", None)
+                os.environ.pop("EXTRACTS_CACHE_ENABLE", None)
             else:
-                os.environ["QUERY_CACHE_ENABLE"] = old
+                os.environ["EXTRACTS_CACHE_ENABLE"] = old
 
 
 # ===========================================================================
@@ -486,7 +486,7 @@ class TestExtractEmptyResult:
         result = ext.extract(str(source_file), "q")
         assert result == ""
 
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
         md_files = list(cache_dir.glob("*.md"))
         assert len(md_files) == 1
         assert md_files[0].read_text(encoding="utf-8") == ""
@@ -502,7 +502,7 @@ class TestExtractEmptyResult:
 
         ext.extract(str(source_file), "q")
 
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
         meta_files = list(cache_dir.glob("*.meta.json"))
         meta = json.loads(meta_files[0].read_text(encoding="utf-8"))
         assert meta["token_count"] == 0
@@ -538,7 +538,7 @@ class TestExtractDifferentQueries:
 
         assert extractor._llm_invoke.call_count == 2
 
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
         md_files = list(cache_dir.glob("*.md"))
         assert len(md_files) == 2
 
@@ -627,7 +627,7 @@ class TestCacheDirectoryCreation:
         ):
             extractor.extract(str(source_file), "q")
 
-        cache_dir = tmp_path / ".pdd" / "query_cache"
+        cache_dir = tmp_path / ".pdd" / "extracts"
         assert cache_dir.is_dir()
 
 
@@ -665,7 +665,7 @@ class TestMetaTimestamp:
     ):
         """Timestamp in meta.json follows ISO-like format."""
         extractor.extract(str(source_file), "q")
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
         meta_files = list(cache_dir.glob("*.meta.json"))
         meta = json.loads(meta_files[0].read_text(encoding="utf-8"))
         ts = meta["timestamp"]
@@ -687,7 +687,7 @@ class TestPartialCacheFiles:
         resolved = source_file.resolve()
         query = "q"
         cache_key = compute_cache_key(str(resolved), query)
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
 
         md_path = cache_dir / f"{cache_key}.md"
         md_path.write_text("partial cache", encoding="utf-8")
@@ -705,7 +705,7 @@ class TestPartialCacheFiles:
         source_hash = hashlib.sha256(content.encode()).hexdigest()
         query = "q"
         cache_key = compute_cache_key(str(resolved), query)
-        cache_dir = patched_config / ".pdd" / "query_cache"
+        cache_dir = patched_config / ".pdd" / "extracts"
 
         meta_path = cache_dir / f"{cache_key}.meta.json"
         meta = {

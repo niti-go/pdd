@@ -1,26 +1,26 @@
 #!/usr/bin/env python
 """
-Example: Using the `pdd query-cache prune` CLI command
+Example: Using the `pdd extracts prune` CLI command
 =======================================================
 
-This module demonstrates how to invoke the ``query-cache prune`` subcommand
+This module demonstrates how to invoke the ``extracts prune`` subcommand
 programmatically and from the command line.
 
 Overview
 --------
-The ``query-cache prune`` command scans every ``.prompt`` file in your project
+The ``extracts prune`` command scans every ``.prompt`` file in your project
 for ``<include path="..." query="...">`` tags, determines which
-``.pdd/query_cache/`` entries are still referenced, and deletes any orphaned
+``.pdd/extracts/`` entries are still referenced, and deletes any orphaned
 cache files (``.md`` + ``.meta.json``).
 
 Command-line usage
 ------------------
     # Interactive mode – shows a table of orphaned entries and asks for
     # confirmation before deleting:
-    pdd query-cache prune
+    pdd extracts prune
 
     # Non-interactive mode – skip the confirmation prompt:
-    pdd query-cache prune --force
+    pdd extracts prune --force
 
 Programmatic usage (Click testing / CliRunner)
 ----------------------------------------------
@@ -31,7 +31,7 @@ Directory layout assumed by the command
 ---------------------------------------
     <project_root>/
     └── .pdd/
-    │   └── query_cache/
+    │   └── extracts/
     │       └── <cache_key>.md            # extracted content
     │       └── <cache_key>.meta.json     # metadata (source_path, query, …)
     └── prompts/
@@ -72,7 +72,7 @@ from click.testing import CliRunner
 
 # ---------------------------------------------------------------------------
 # Helper: set up a realistic temporary project so the command has something
-# to work with.  In real usage you would simply run ``pdd query-cache prune``
+# to work with.  In real usage you would simply run ``pdd extracts prune``
 # inside your project directory.
 # ---------------------------------------------------------------------------
 
@@ -103,7 +103,7 @@ def _setup_sample_project(tmp: Path) -> tuple[str, str]:
     )
 
     # Cache directory
-    cache_dir = tmp / ".pdd" / "query_cache"
+    cache_dir = tmp / ".pdd" / "extracts"
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Compute the referenced cache key (same formula the real code uses)
@@ -153,20 +153,20 @@ def _setup_sample_project(tmp: Path) -> tuple[str, str]:
 
 def example_prune_with_cli_runner():
     """
-    Demonstrate invoking ``query-cache prune --force`` programmatically.
+    Demonstrate invoking ``extracts prune --force`` programmatically.
 
     This is the recommended approach for integration tests.  The CliRunner
     captures stdout/stderr so you can assert on the output.
     """
     # We import the click group defined in the module.
     # In a real project this import path would be:
-    #     from pdd.commands.query_cache import query_cache
+    #     from pdd.commands.extracts import extracts
     # Here we import it directly since we're demonstrating usage.
     try:
-        from pdd.commands.query_cache import query_cache
+        from pdd.commands.extracts import extracts
     except ImportError:
         print(
-            "Could not import pdd.commands.query_cache – "
+            "Could not import pdd.commands.extracts – "
             "make sure the pdd package is installed or on PYTHONPATH."
         )
         return
@@ -177,7 +177,7 @@ def example_prune_with_cli_runner():
         tmp = Path(tmp_str)
         referenced_key, orphaned_key = _setup_sample_project(tmp)
 
-        cache_dir = tmp / ".pdd" / "query_cache"
+        cache_dir = tmp / ".pdd" / "extracts"
 
         # Patch the working directory so get_config() picks up project_root
         old_cwd = os.getcwd()
@@ -185,7 +185,7 @@ def example_prune_with_cli_runner():
         try:
             # Invoke the prune subcommand with --force to skip confirmation
             result = runner.invoke(
-                query_cache,
+                extracts,
                 ["prune", "--force"],
                 obj={"force": False},  # ctx.obj must be a dict
                 catch_exceptions=False,
@@ -218,7 +218,7 @@ def example_inspect_orphans():
     without deleting anything.  Useful for dry-run / audit scripts.
     """
     try:
-        from pdd.commands.query_cache import (
+        from pdd.commands.extracts import (
             _cache_dir,
             _collect_referenced_keys,
         )

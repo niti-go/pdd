@@ -50,7 +50,7 @@ except ImportError:
 # Constants
 # ---------------------------------------------------------------------------
 EXTRACTION_STRENGTH = "strong"
-_ENV_CACHE_ENABLE = "QUERY_CACHE_ENABLE"
+_ENV_CACHE_ENABLE = "EXTRACTS_CACHE_ENABLE"
 
 
 # ---------------------------------------------------------------------------
@@ -68,16 +68,16 @@ def _file_content_hash(content: str) -> str:
 
 
 def _cache_enabled() -> bool:
-    """Return whether the query cache is enabled (default ``True``)."""
+    """Return whether the extracts cache is enabled (default ``True``)."""
     val = os.environ.get(_ENV_CACHE_ENABLE, "true").strip().lower()
     return val not in ("false", "0", "no")
 
 
 def _cache_dir() -> Path:
-    """Return the query cache directory, creating it if necessary."""
+    """Return the extracts cache directory, creating it if necessary."""
     cfg = get_config()
     root = Path(cfg.get("project_root", ".")).resolve()
-    d = root / ".pdd" / "query_cache"
+    d = root / ".pdd" / "extracts"
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -89,7 +89,7 @@ def _cache_dir() -> Path:
 class IncludeQueryExtractor:
     """Extract semantically relevant content from a file via an LLM.
 
-    Results are persistently cached under ``.pdd/query_cache/`` so that
+    Results are persistently cached under ``.pdd/extracts/`` so that
     subsequent builds are reproducible and token-efficient.
     """
 
@@ -128,7 +128,7 @@ class IncludeQueryExtractor:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
                 if meta.get("source_hash") == source_hash:
                     _console.print(
-                        f"[dim]Using cached query result for[/dim] "
+                        f"[dim]Using cached extract for[/dim] "
                         f"[bold]{resolved.name}[/bold] [dim]query=[/dim]'{query}'"
                     )
                     return md_path.read_text(encoding="utf-8")

@@ -1,4 +1,4 @@
-"""Example usage of the IncludeQueryExtractor module.\n\nThis script demonstrates how to use the ``IncludeQueryExtractor`` class to\nperform semantic extraction from a source file via an LLM, with persistent\ncaching under ``.pdd/query_cache/``.\n\nKey concepts\n------------\n* **extract(file_path, query)**\n    - ``file_path`` (str): Absolute or project-relative path to the file you\n      want to query.  The file must exist and be UTF-8 encoded.\n    - ``query`` (str): A natural-language description of what information to\n      extract from the file (e.g. \"List all public function signatures\").\n    - Returns ``str``: The extracted content in Markdown format.\n\n* **Caching** – Results are stored in ``.pdd/query_cache/`` as two files per\n  entry:\n    - ``<cache_key>.md``        – the extracted Markdown content.\n    - ``<cache_key>.meta.json`` – provenance metadata (source path, content\n      hash, query, timestamp, approximate token count).\n  On subsequent calls the cache is checked first; if the source file has not\n  changed the cached result is returned immediately.\n\n* **Cache control** – Set the environment variable ``QUERY_CACHE_ENABLE=false``\n  to bypass the cache entirely (always re-extract via the LLM).\n\n* **Cache key** – Deterministic: ``sha256(resolved_file_path + '\\\
+"""Example usage of the IncludeQueryExtractor module.\n\nThis script demonstrates how to use the ``IncludeQueryExtractor`` class to\nperform semantic extraction from a source file via an LLM, with persistent\ncaching under ``.pdd/extracts/``.\n\nKey concepts\n------------\n* **extract(file_path, query)**\n    - ``file_path`` (str): Absolute or project-relative path to the file you\n      want to query.  The file must exist and be UTF-8 encoded.\n    - ``query`` (str): A natural-language description of what information to\n      extract from the file (e.g. \"List all public function signatures\").\n    - Returns ``str``: The extracted content in Markdown format.\n\n* **Caching** – Results are stored in ``.pdd/extracts/`` as two files per\n  entry:\n    - ``<cache_key>.md``        – the extracted Markdown content.\n    - ``<cache_key>.meta.json`` – provenance metadata (source path, content\n      hash, query, timestamp, approximate token count).\n  On subsequent calls the cache is checked first; if the source file has not\n  changed the cached result is returned immediately.\n\n* **Cache control** – Set the environment variable ``EXTRACTS_CACHE_ENABLE=false``\n  to bypass the cache entirely (always re-extract via the LLM).\n\n* **Cache key** – Deterministic: ``sha256(resolved_file_path + '\\\
 ' + query)``.\n  You can compute it yourself with ``compute_cache_key(path, query)``.\n"""
 
 from __future__ import annotations
@@ -76,14 +76,14 @@ def main() -> None:
 
         # -----------------------------------------------------------------
         # 7. Disable the cache via environment variable.
-        #    When QUERY_CACHE_ENABLE=false every call goes to the LLM.
+        #    When EXTRACTS_CACHE_ENABLE=false every call goes to the LLM.
         # -----------------------------------------------------------------
-        os.environ["QUERY_CACHE_ENABLE"] = "false"
+        os.environ["EXTRACTS_CACHE_ENABLE"] = "false"
         result_uncached = extractor.extract(str(source_file), query)
         print(f"Uncached result length: {len(result_uncached)} chars")
 
         # Re-enable for subsequent calls.
-        os.environ["QUERY_CACHE_ENABLE"] = "true"
+        os.environ["EXTRACTS_CACHE_ENABLE"] = "true"
 
         # -----------------------------------------------------------------
         # 8. Modify the source file – the cache detects staleness.

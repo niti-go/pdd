@@ -467,10 +467,10 @@ For large, unstructured documents where structural selectors aren't enough (e.g.
 
 **Behavior:**
 
-- **First run:** PDD asks an LLM to perform the extraction, caches the result in `.pdd/query_cache/`, and includes it.
+- **First run:** PDD asks an LLM to perform the extraction, caches the result in `.pdd/extracts/`, and includes it.
 - **Subsequent runs:** PDD uses the cached file (deterministic and fast).
 - **Auto-refresh:** If the source file changes, PDD automatically re-extracts via LLM and updates the cache upon processing the `<include ... query>` tag the next time.
-- **Pruning:** Run `pdd query-cache prune` to garbage-collect orphaned cache entries no longer referenced by any prompt.
+- **Pruning:** Run `pdd extracts prune` to garbage-collect orphaned cache entries no longer referenced by any prompt.
 
 ### Positive over Negative Constraints
 
