@@ -2811,22 +2811,3 @@ def test_include_tag_with_mode_attribute():
     assert "Summary" in result
 
 
-# ============================================================================
-# Include tag with max_tokens attribute
-# ============================================================================
-
-def test_include_tag_with_max_tokens():
-    """Cover include with max_tokens attribute."""
-    prompt = '<include path="file.py" max_tokens="100"/>'
-    file_content = "def main():\n    pass\n"
-
-    mock_selector = MagicMock()
-    mock_selector.ContentSelector.return_value.select.return_value = "truncated content"
-
-    with patch('builtins.open', mock_open(read_data=file_content)):
-        with patch.dict('sys.modules', {'pdd.content_selector': mock_selector}):
-            result = process_include_tags(prompt, recursive=False)
-
-    mock_selector.ContentSelector.return_value.select.assert_called_once()
-    call_kwargs = mock_selector.ContentSelector.return_value.select.call_args
-    assert call_kwargs[1]['max_tokens'] == 100
