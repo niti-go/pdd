@@ -219,7 +219,6 @@ def process_xml_tags(text: str, recursive: bool, _seen: Optional[set] = None) ->
         _seen = set()
     text = process_pdd_tags(text)
     text = process_include_tags(text, recursive, _seen=_seen)
-    text = process_extract_tags(text, recursive)
     text = process_include_many_tags(text, recursive)
     text = process_shell_tags(text, recursive)
     text = process_web_tags(text, recursive)
@@ -243,14 +242,32 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
     def replace_include(match):
         attrs_str = match.group('attrs') or match.group('attrs_self') or ""
         attrs = _parse_attrs(attrs_str)
-        
-        file_path = attrs.get('path')
-        if file_path:
-            file_path = get_file_path(file_path) or match.group('content') or ""
-        file_path = file_path.strip()
-        
+
+        # Content between tags (used as path for bare <include>path</include>)
+        content = match.group('content') if match.group('content') is not None else ""
+
+        file_path = attrs.get('path') or content.strip()
         if not file_path:
             return match.group(0)
+
+        file_path = file_path.strip()
+
+        # Handle query attribute — semantic LLM extraction
+        query = attrs.get('query')
+        if query:
+            if recursive:
+                return match.group(0)
+            try:
+                resolved_path = get_file_path(file_path)
+                from pdd.include_query_extractor import IncludeQueryExtractor
+                extractor = IncludeQueryExtractor()
+                return extractor.extract(file_path=resolved_path, query=query)
+            except ImportError:
+                console.print("[yellow]Warning: pdd.include_query_extractor not found. Cannot perform semantic query.[/yellow]")
+                return f"[Error: pdd.include_query_extractor not found. Cannot query from {file_path}]"
+            except Exception as e:
+                console.print(f"[bold red]Error in semantic query:[/bold red] {e}")
+                return f"[Error in semantic query from {file_path}: {e}]"
 
         try:
             full_path = get_file_path(file_path)
@@ -259,7 +276,7 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
                 raise ValueError(f"Circular include detected: {file_path} is already in the include chain")
             ext = os.path.splitext(file_path)[1].lower()
             image_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.heic']
-            
+
             if ext in image_extensions:
                 console.print(f"Processing image include: [cyan]{full_path}[/cyan]")
                 from PIL import Image
@@ -368,41 +385,6 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
         current_text = re.sub(pattern, replace_include_with_spans, current_text, flags=re.DOTALL)
         iterations += 1
     return current_text
-
-def process_extract_tags(text: str, recursive: bool) -> str:
-    pattern = r'<extract(?P<attrs>\s+[^>]*?)?>(?P<query>.*?)</extract>'
-    def replace_extract(match):
-        attrs_str = match.group('attrs') or ""
-        attrs = _parse_attrs(attrs_str)
-        query = match.group('query').strip()
-        file_path = attrs.get('path')
-        if file_path:
-            file_path = get_file_path(file_path)
-        
-        if not file_path:
-            console.print("[bold red]Error:[/bold red] <extract> tag missing 'path' attribute")
-            return "[Error: <extract> tag missing 'path' attribute]"
-            
-        if recursive:
-            return match.group(0)
-            
-        try:
-            from pdd.llm_extractor import LLMExtractor
-            extractor = LLMExtractor()
-            return extractor.extract(file_path=file_path, query=query)
-        except ImportError:
-            console.print("[yellow]Warning: pdd.llm_extractor not found. Cannot perform semantic extraction.[/yellow]")
-            return f"[Error: pdd.llm_extractor not found. Cannot extract from {file_path}]"
-        except Exception as e:
-            console.print(f"[bold red]Error in semantic extraction:[/bold red] {e}")
-            return f"[Error in semantic extraction from {file_path}: {e}]"
-            
-    code_spans = _extract_code_spans(text)
-    def replace_extract_with_spans(match):
-        if _intersects_any_span(match.start(), match.end(), code_spans):
-            return match.group(0)
-        return replace_extract(match)
-    return re.sub(pattern, replace_extract_with_spans, text, flags=re.DOTALL)
 
 def process_pdd_tags(text: str) -> str:
     pattern = r'<pdd>.*?</pdd>'

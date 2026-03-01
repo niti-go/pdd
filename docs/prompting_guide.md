@@ -193,7 +193,7 @@ Tip: Prefer small, named sections using XML‑style tags to make context scannab
 
 ### Special XML Tags: pdd, shell, web
 
-The PDD preprocessor supports additional XML‑style tags to keep prompts clean, reproducible, and self‑contained. Processing order (per spec) is: `pdd` → `include` → `extract` → `include-many` → `shell` → `web`. When `recursive=True`, `<shell>`, `<web>`, `<extract>`, and `<include-many>` are deferred until a non‑recursive pass.
+The PDD preprocessor supports additional XML‑style tags to keep prompts clean, reproducible, and self‑contained. Processing order (per spec) is: `pdd` → `include` → `include-many` → `shell` → `web`. When `recursive=True`, `<shell>`, `<web>`, `<include ... query="...">`, and `<include-many>` are deferred until a non‑recursive pass.
 
 - ``
   - Purpose: human‑only comment. Removed entirely during preprocessing.
@@ -212,10 +212,10 @@ The PDD preprocessor supports additional XML‑style tags to keep prompts clean,
 
 > ⚠️ **Warning: Non-Deterministic Tags**
 >
-> `<shell>`, `<web>`, and `<extract>` introduce **non-determinism**:
+> `<shell>`, `<web>`, and `<include ... query="...">` introduce **non-determinism**:
 > - `<shell>` output varies by environment (different machines, different results)
 > - `<web>` content changes over time (same URL, different content)
-> - `<extract>` relies on LLM interpretation (may vary by model or seed)
+> - `<include ... query="...">` relies on LLM interpretation (may vary by model or seed)
 >
 > **Impact:** Same prompt file → different generations on different machines/times
 >
@@ -455,30 +455,22 @@ Use `mode="interface"` to extract only the public API (signatures, docstrings, t
 <include path="src/billing/service.py" select="class:BillingService" mode="interface"/>
 ```
 
-**Token Budgeting:**
-Enforce token limits on included content using `max_tokens`. The `overflow` attribute determines behavior when the limit is exceeded (`warn` (default), `truncate`, or `error`).
+### LLM-Powered Semantic Query (`<include ... query="...">`)
 
-```xml
-<include path="docs/api_ref.md" max_tokens="1000" overflow="error"/>
-```
-
-### LLM-Powered Extraction (<extract>)
-
-For large, unstructured documents where structural selectors aren't enough (e.g., "find all retry policies in this 50-page PDF"), use the `<extract>` tag. This uses an LLM to semantically extract relevant information.
+For large, unstructured documents where structural selectors aren't enough (e.g., "find all retry policies in this 50-page PDF"), use the `query` attribute on `<include>`. This uses an LLM to semantically extract relevant information.
 
 **Syntax:**
 
 ```xml
-<extract path="docs/large_api_reference.md">
-  Authentication flow, JWT token structure, and refresh token handling
-</extract>
+<include path="docs/large_api_reference.md" query="Authentication flow, JWT token structure, and refresh token handling"/>
 ```
 
 **Behavior:**
 
-- **First run:** PDD asks an LLM to perform the extraction, caches the result in `.pdd/extracts/`, and includes it.
+- **First run:** PDD asks an LLM to perform the extraction, caches the result in `.pdd/query_cache/`, and includes it.
 - **Subsequent runs:** PDD uses the cached file (deterministic and fast).
-- **Updates:** If the source file changes, PDD warns you. Run `pdd extract refresh` to update the cache.
+- **Auto-refresh:** If the source file changes, PDD automatically re-extracts via LLM and updates the cache upon processing the `<include ... query>` tag the next time.
+- **Pruning:** Run `pdd query-cache prune` to garbage-collect orphaned cache entries no longer referenced by any prompt.
 
 ### Positive over Negative Constraints
 
