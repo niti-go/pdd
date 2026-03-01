@@ -2,13 +2,14 @@
 Content selector module for precise extraction of file content.
 
 Provides extraction based on line ranges, AST structures (Python),
-Markdown sections, and regex patterns. Used by the PDD preprocessor
-for selective includes.
+Markdown sections, regex patterns, and JSON/YAML path traversal.
+Used by the PDD preprocessor for selective includes.
 """
 
 from __future__ import annotations
 
 import ast
+import json
 import re
 import textwrap
 from dataclasses import dataclass, field
@@ -16,6 +17,14 @@ from typing import Optional
 
 from rich.console import Console
 from rich.theme import Theme
+
+# Conditional YAML support
+try:
+    import yaml
+
+    _HAS_YAML = True
+except ImportError:  # pragma: no cover
+    _HAS_YAML = False
 
 # Rich console with custom theme for error reporting
 _theme = Theme(
@@ -83,7 +92,7 @@ def _extract_spans(lines: list[str], spans: list[_Span]) -> str:
 # ---------------------------------------------------------------------------
 
 _SELECTOR_RE = re.compile(
-    r"^(?P<kind>lines|def|class|section|pattern):(?P<value>.+)$"
+    r"^(?P<kind>lines|def|class|section|pattern|path):(?P<value>.+)$"
 )
 
 
@@ -104,7 +113,8 @@ def _parse_selectors(selectors: list[str]) -> list[_ParsedSelector]:
         if not m:
             raise SelectorError(
                 f"Malformed selector: '{raw}'. "
-                "Expected format: lines:N-M | def:name | class:Name[.method] | section:Heading | pattern:/regex/"
+                "Expected format: lines:N-M | def:name | class:Name[.method] "
+                "| section:Heading | pattern:/regex/ | path:key.path"
             )
         parsed.append(_ParsedSelector(kind=m.group("kind"), value=m.group("value")))
     return parsed
@@ -421,6 +431,129 @@ def _resolve_pattern(content_lines: list[str], value: str) -> list[_Span]:
 
 
 # ---------------------------------------------------------------------------
+# JSON/YAML path selector
+# ---------------------------------------------------------------------------
+
+_PATH_SEGMENT_RE = re.compile(r"([^\.\[\]]+)|\[(\d+)\]")
+
+
+def _parse_path_segments(path: str) -> list[str | int]:
+    """Parse a dot/bracket path expression into a list of segments.
+
+    Examples::
+
+        "key"                → ["key"]
+        "key.nested.child"   → ["key", "nested", "child"]
+        "key[0]"             → ["key", 0]
+        "key[0].name"        → ["key", 0, "name"]
+        "[0]"                → [0]
+    """
+    segments: list[str | int] = []
+    pos = 0
+    while pos < len(path):
+        if path[pos] == ".":
+            pos += 1
+            continue
+        if path[pos] == "[":
+            # Array index
+            end = path.index("]", pos)
+            idx_str = path[pos + 1 : end]
+            try:
+                segments.append(int(idx_str))
+            except ValueError:
+                raise SelectorError(
+                    f"Invalid array index in path: '{path}' (got '{idx_str}')"
+                )
+            pos = end + 1
+        else:
+            # Key segment — read until next '.' or '['
+            end = pos
+            while end < len(path) and path[end] not in (".", "["):
+                end += 1
+            segments.append(path[pos:end])
+            pos = end
+    if not segments:
+        raise SelectorError(f"Empty path expression: '{path}'")
+    return segments
+
+
+def _traverse_path(data: object, segments: list[str | int], full_path: str) -> object:
+    """Navigate into *data* following *segments*, raising on missing keys."""
+    current = data
+    traversed: list[str] = []
+    for seg in segments:
+        if isinstance(seg, int):
+            if not isinstance(current, list):
+                raise SelectorError(
+                    f"Expected array at '{'.'.join(traversed)}' in path '{full_path}', "
+                    f"got {type(current).__name__}"
+                )
+            if seg < 0 or seg >= len(current):
+                raise SelectorError(
+                    f"Array index {seg} out of range (length {len(current)}) "
+                    f"at '{'.'.join(traversed)}' in path '{full_path}'"
+                )
+            current = current[seg]
+            traversed.append(f"[{seg}]")
+        else:
+            if not isinstance(current, dict):
+                raise SelectorError(
+                    f"Expected object at '{'.'.join(traversed)}' in path '{full_path}', "
+                    f"got {type(current).__name__}"
+                )
+            if seg not in current:
+                raise SelectorError(
+                    f"Key '{seg}' not found at '{'.'.join(traversed) or 'root'}' "
+                    f"in path '{full_path}'"
+                )
+            current = current[seg]
+            traversed.append(seg)
+    return current
+
+
+def _resolve_path(content: str, value: str, file_path: str | None) -> str:
+    """Resolve a ``path:`` selector for JSON/YAML content.
+
+    Parses the content, traverses to the requested path, and re-serializes
+    the extracted value in the same format (pretty-printed).
+    """
+    is_json_file = _is_json(file_path)
+    is_yaml_file = _is_yaml(file_path)
+
+    # Parse the content
+    if is_json_file:
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError as exc:
+            raise SelectorError(f"Failed to parse JSON: {exc}") from exc
+    elif is_yaml_file:
+        if not _HAS_YAML:
+            raise SelectorError(
+                "PyYAML is required for YAML path selectors but is not installed. "
+                "Install it with: pip install pyyaml"
+            )
+        try:
+            data = yaml.safe_load(content)
+        except yaml.YAMLError as exc:
+            raise SelectorError(f"Failed to parse YAML: {exc}") from exc
+    else:
+        raise SelectorError(
+            f"Path selector requires a JSON or YAML file, got '{file_path}'"
+        )
+
+    # Parse and traverse the path
+    segments = _parse_path_segments(value)
+    result = _traverse_path(data, segments, value)
+
+    # Re-serialize in the source format
+    if is_json_file:
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    else:
+        # YAML output
+        return yaml.dump(result, default_flow_style=False, allow_unicode=True).rstrip("\n")
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -443,11 +576,11 @@ class ContentSelector:
         selectors:
             A list of selector strings **or** a single comma-separated string.
             Each selector has the form ``kind:value`` where *kind* is one of
-            ``lines``, ``def``, ``class``, ``section``, ``pattern``.
+            ``lines``, ``def``, ``class``, ``section``, ``pattern``, ``path``.
         file_path:
             Optional file path used to infer the file type (e.g. ``.py``,
-            ``.md``).  When ``None``, AST-based selectors will attempt to
-            parse as Python.
+            ``.md``, ``.json``, ``.yaml``).  When ``None``, AST-based
+            selectors will attempt to parse as Python.
         mode:
             ``"full"`` (default) returns the selected content verbatim.
             ``"interface"`` (Python only) returns signatures, docstrings,
@@ -475,11 +608,18 @@ class ContentSelector:
             return content
 
         parsed = _parse_selectors(selectors)
+
+        # If all selectors were empty/whitespace strings, parsed will be empty.
+        # In that case, treat as "no selectors" and return full content.
+        if not parsed:
+            return content
+
         source_lines = _splitlines(content)
 
         # Determine file type
         is_python = _is_python(file_path)
         is_markdown = _is_markdown(file_path)
+        is_json_or_yaml = _is_json(file_path) or _is_yaml(file_path)
 
         # We may need the AST for Python selectors
         tree: ast.Module | None = None
@@ -509,8 +649,20 @@ class ContentSelector:
                 f"Section selector requires a .md file, got '{file_path}'"
             )
 
-        # Collect spans
+        needs_path = any(p.kind == "path" for p in parsed)
+        if needs_path and not is_json_or_yaml:
+            _report_error(
+                f"Path selector requires a JSON or YAML file, got '{file_path}'",
+                file_path,
+            )
+            raise SelectorError(
+                f"Path selector requires a .json/.yaml/.yml file, got '{file_path}'"
+            )
+
+        # Collect spans (for span-based selectors) and path results separately
         all_spans: list[_Span] = []
+        path_results: list[str] = []
+
         for sel in parsed:
             try:
                 if sel.kind == "lines":
@@ -522,6 +674,8 @@ class ContentSelector:
                     all_spans.extend(_resolve_section(source_lines, sel.value))
                 elif sel.kind == "pattern":
                     all_spans.extend(_resolve_pattern(source_lines, sel.value))
+                elif sel.kind == "path":
+                    path_results.append(_resolve_path(content, sel.value, file_path))
                 else:
                     raise SelectorError(f"Unknown selector kind: '{sel.kind}'")
             except SelectorError:
@@ -535,14 +689,24 @@ class ContentSelector:
                     f"Error processing selector '{sel.kind}:{sel.value}': {exc}"
                 ) from exc
 
-        if not all_spans:
+        # Build final result
+        parts: list[str] = []
+
+        # Span-based content
+        if all_spans:
+            # Interface mode post-processing for AST selectors
+            if mode == "interface" and is_python and tree is not None:
+                parts.append(_interface_from_spans(content, source_lines, tree, all_spans))
+            else:
+                parts.append(_extract_spans(source_lines, all_spans))
+
+        # Path-based content
+        parts.extend(path_results)
+
+        if not parts:
             return ""
 
-        # Interface mode post-processing for AST selectors
-        if mode == "interface" and is_python and tree is not None:
-            return _interface_from_spans(content, source_lines, tree, all_spans)
-
-        return _extract_spans(source_lines, all_spans)
+        return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +764,19 @@ def _is_markdown(file_path: str | None) -> bool:
         return False
     lower = file_path.rstrip().lower()
     return lower.endswith(".md") or lower.endswith(".markdown")
+
+
+def _is_json(file_path: str | None) -> bool:
+    if file_path is None:
+        return False
+    return file_path.rstrip().lower().endswith(".json")
+
+
+def _is_yaml(file_path: str | None) -> bool:
+    if file_path is None:
+        return False
+    lower = file_path.rstrip().lower()
+    return lower.endswith(".yaml") or lower.endswith(".yml")
 
 
 def _report_error(message: str, file_path: str | None = None) -> None:

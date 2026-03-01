@@ -323,10 +323,8 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
                     selectors_str = attrs.get('select')
                     lines_str = attrs.get('lines')
                     mode = attrs.get('mode', 'full')
-                    max_tokens = attrs.get('max_tokens')
-                    overflow = attrs.get('overflow', 'warn')
-                    
-                    if selectors_str or lines_str or mode != 'full' or max_tokens:
+
+                    if selectors_str or lines_str or mode != 'full':
                         selectors = []
                         if selectors_str:
                             selectors.extend([s.strip() for s in selectors_str.split(',')])
@@ -341,8 +339,6 @@ def process_include_tags(text: str, recursive: bool, _seen: Optional[set] = None
                                 selectors=selectors,
                                 file_path=full_path,
                                 mode=mode,
-                                max_tokens=int(max_tokens) if max_tokens else None,
-                                overflow=overflow
                             )
                         except ImportError:
                             console.print("[yellow]Warning: pdd.content_selector not found. Including full content.[/yellow]")
